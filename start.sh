@@ -14,9 +14,18 @@ STATICMAP="$PERSIST/staticmap_cache"
 LOGDIR="$PERSIST/logs"
 mkdir -p "$PGDATA" "$UPLOADS" "$STATICMAP" "$LOGDIR"
 
-PGBIN="$(ls -d /usr/libexec/postgresql16 2>/dev/null || true)"
+# Locate the PostgreSQL binaries. The installed major version is whatever the
+# postgis package depended on (recorded at build time in /etc/oh-pg-version).
+PGVER=""
+[ -f /etc/oh-pg-version ] && . /etc/oh-pg-version
+if [ -n "$PGVER" ] && [ -d "/usr/libexec/postgresql$PGVER" ]; then
+    PGBIN="/usr/libexec/postgresql$PGVER"
+else
+    PGBIN="$(ls -d /usr/libexec/postgresql* 2>/dev/null | head -1 || true)"
+fi
 [ -z "$PGBIN" ] && PGBIN="/usr/bin"
 export PATH="$PGBIN:$PATH"
+echo "[start] using postgres binaries at $PGBIN"
 
 DB_NAME=fittrackee
 DB_USER=fittrackee
@@ -42,16 +51,33 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
     echo "unix_socket_directories = '/tmp'" >> "$PGDATA/postgresql.conf"
 fi
 
+# Remove a stale pid left by an unclean previous shutdown (container was
+# killed) so pg_ctl doesn't refuse to start / warn "another server might be
+# running".
+if [ -f "$PGDATA/postmaster.pid" ]; then
+    STALE_PID="$(head -1 "$PGDATA/postmaster.pid" 2>/dev/null || true)"
+    if [ -n "$STALE_PID" ] && ! kill -0 "$STALE_PID" 2>/dev/null; then
+        echo "[start] removing stale postmaster.pid ($STALE_PID)"
+        rm -f "$PGDATA/postmaster.pid"
+    fi
+fi
+
 echo "[start] starting PostgreSQL"
 su-exec postgres pg_ctl -D "$PGDATA" -o "-k /tmp" -w -t 60 start
 
 # Wait for socket.
-for i in $(seq 1 30); do
+PG_UP=0
+for i in $(seq 1 60); do
     if su-exec postgres psql -h /tmp -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
+        PG_UP=1
         break
     fi
     sleep 1
 done
+if [ "$PG_UP" != "1" ]; then
+    echo "[start] FATAL: PostgreSQL did not become ready"
+    exit 1
+fi
 
 # --- provision role, db, postgis ------------------------------------------
 su-exec postgres psql -h /tmp -d postgres -tc \
@@ -66,8 +92,12 @@ su-exec postgres psql -h /tmp -d postgres -tc \
     "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1 || \
     su-exec postgres psql -h /tmp -d postgres -c \
         "CREATE DATABASE $DB_NAME OWNER $DB_USER"
-su-exec postgres psql -h /tmp -d "$DB_NAME" -c \
-    "CREATE EXTENSION IF NOT EXISTS postgis" >/dev/null
+if ! su-exec postgres psql -h /tmp -d "$DB_NAME" -c \
+        "CREATE EXTENSION IF NOT EXISTS postgis" >/dev/null; then
+    echo "[start] FATAL: could not create the postgis extension (packaging bug?)"
+    su-exec postgres pg_ctl -D "$PGDATA" -m fast stop || true
+    exit 1
+fi
 
 # --- FitTrackee config -----------------------------------------------------
 APP_SUBDOMAIN="${OPENHOST_APP_NAME:-fittrackee}"
