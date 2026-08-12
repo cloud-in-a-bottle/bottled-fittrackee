@@ -1,7 +1,7 @@
-# openhost-fittrackee
+# bottled-fittrackee
 
 [FitTrackee](https://github.com/SamR1/FitTrackee) (self-hosted outdoor activity
-and workout tracker) packaged for OpenHost with one-click owner SSO.
+and workout tracker) packaged for Cloud in a Bottle with one-click owner SSO.
 
 Log workouts (GPX upload or manual entry), track distance/duration/elevation,
 view stats and a calendar, and manage everything from a single self-hosted app.
@@ -10,12 +10,12 @@ view stats and a calendar, and manage everything from a single self-hosted app.
 > activities (running, cycling, hiking, GPX routes). It does **not** have a
 > dedicated set/rep weightlifting logger or a bodyweight-over-time chart. If
 > your primary goal is barbell lifting + bodyweight tracking, see
-> [openhost-lyftr](https://github.com/imbue-openhost/openhost-lyftr) instead.
+> [bottled-lyftr](https://github.com/imbue-openhost/bottled-lyftr) instead.
 
 ## Architecture
 
 FitTrackee requires PostgreSQL + PostGIS. To keep this a single self-contained
-OpenHost app, PostgreSQL 16 + PostGIS are **bundled inside the container**, with
+Cloud in a Bottle app, PostgreSQL 16 + PostGIS are **bundled inside the container**, with
 the data cluster stored under the persistent app-data dir. A small Python
 auth-proxy fronts gunicorn and provides owner SSO.
 
@@ -30,7 +30,7 @@ gunicorn and the auth-proxy.
 ## SSO model
 
 FitTrackee is a localStorage-JWT SPA (no cookies, no header auth). We bridge
-OpenHost's `X-OpenHost-Is-Owner` signal into its own JWT scheme:
+Cloud in a Bottle's `X-OpenHost-Is-Owner` signal into its own JWT scheme:
 
 1. On the owner's first HTML navigation, the auth-proxy injects a bootstrap
    script into `index.html`.
